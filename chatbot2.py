@@ -2,11 +2,11 @@ import os
 import streamlit as st
 from dotenv import load_dotenv
 
-# 기존 임포트 수정
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
@@ -23,11 +23,12 @@ if not api_key:
     st.error("GEMINI_API_KEY가 설정되지 않았습니다.")
     st.stop()
 
-# 2. 페이지 및 UI 설정 (상단/하단 메인 메뉴 및 배너 숨기기)
+# 2. 페이지 기본 설정 및 UI 요소 숨기기 (CSS)
 st.set_page_config(page_title="PDF 기반 RAG 챗봇", layout="centered")
 
 custom_css = """
     <style>
+    /* 상단 헤더, 메인 메뉴, 하단 푸터 완전히 숨기기 */
     header, #MainMenu, [data-testid="stHeader"], footer, .stAppFooter, [data-testid="stFooter"] {
         display: none !important;
         height: 0px !important;
@@ -47,15 +48,14 @@ st.markdown(custom_css, unsafe_allow_html=True)
 st.title("📄 PDF 문서 기반 RAG 챗봇")
 st.caption("PDF 문서를 업로드하고 궁금한 점을 질문해 보세요!")
 
-# 3. 사이드바 - PDF 업로드 파트
+# 3. 사이드바 - PDF 파일 업로더
 with st.sidebar:
     st.header("📄 문서 업로드")
     uploaded_file = st.file_uploader("PDF 파일을 선택하세요", type=["pdf"])
 
-# 4. PDF 문서 처리 및 벡터DB(FAISS) 생성 함수
+# 4. PDF 문서 분석 및 FAISS 벡터 스토어 생성 함수 (HuggingFaceEmbeddings 적용)
 @st.cache_resource(show_spinner="PDF 문서를 분석하고 벡터DB를 생성 중입니다...")
 def process_pdf(uploaded_file_bytes, file_name):
-    # 임시 파일로 저장하여 PyPDFLoader에서 읽을 수 있도록 함
     temp_path = f"./temp_{file_name}"
     with open(temp_path, "wb") as f:
         f.write(uploaded_file_bytes)
@@ -68,14 +68,12 @@ def process_pdf(uploaded_file_bytes, file_name):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
     split_docs = text_splitter.split_documents(docs)
 
-    # Gemini 임베딩 모델 준비
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="text-embedding-004", 
-        google_api_key=api_key,
-        task_type="retrieval_document"
+    # 한국어 및 영어 성능이 뛰어난 HuggingFace 임베딩 모델 로드 (API 에러 완벽 해결)
+    embeddings = HuggingFaceEmbeddings(
+        model_name="jhgan/ko-sroberta-multitask"
     )
 
-    # FAISS 벡터 스토어 생성
+    # FAISS 벡터DB 생성
     vectorstore = FAISS.from_documents(split_docs, embeddings)
 
     # 임시 파일 삭제
@@ -84,25 +82,23 @@ def process_pdf(uploaded_file_bytes, file_name):
 
     return vectorstore
 
-# 5. 세션 상태(대화 내역 및 벡터DB) 초기화
+# 5. 세션 상태 초기화 및 대화 출력
 if "messages" not in st.session_state:
     st.session_state["messages"] = [
         {"role": "assistant", "content": "안녕하세요! PDF 문서를 왼쪽 사이드바에 업로드하신 후 질문해 주세요."}
     ]
 
-# 대화 내용 출력
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# 6. PDF 업로드 시 처리 흐름
+# 6. PDF 파일 처리
 vectorstore = None
 if uploaded_file is not None:
-    # 파일 바이트 추출 및 처리
     file_bytes = uploaded_file.getvalue()
     vectorstore = process_pdf(file_bytes, uploaded_file.name)
     st.sidebar.success("PDF 분석이 완료되었습니다!")
 
-# 7. 사용자 질문 처리 (RAG 대화 로직)
+# 7. 사용자 질문 처리 (RAG 대화 및 LCEL 구현)
 if user_input := st.chat_input("문서 내용에 대해 질문하세요..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
     st.chat_message("user").write(user_input)
@@ -133,13 +129,12 @@ if user_input := st.chat_input("문서 내용에 대해 질문하세요..."):
                     ("human", "{input}"),
                 ])
 
-                # 문서 결합 함수 (검색된 문서들을 하나의 텍스트로 합침)
                 def format_docs(docs):
                     return "\n\n".join(doc.page_content for doc in docs)
 
                 retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 3})
 
-                # 최신 LCEL 기반 RAG 체인 구성
+                # LCEL 기반 RAG 파이프라인 구성
                 rag_chain = (
                     {"context": retriever | format_docs, "input": RunnablePassthrough()}
                     | prompt
@@ -147,7 +142,6 @@ if user_input := st.chat_input("문서 내용에 대해 질문하세요..."):
                     | StrOutputParser()
                 )
 
-                # 답변 생성
                 response_text = rag_chain.invoke(user_input)
                 st.write(response_text)
 
