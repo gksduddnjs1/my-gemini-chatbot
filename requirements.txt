@@ -3,6 +3,7 @@ google-genai
 python-dotenv
 langchain
 langchain-community
+langchain-core
 langchain-google-genai
 pypdf
 faiss-cpu

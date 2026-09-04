@@ -71,7 +71,8 @@ def process_pdf(uploaded_file_bytes, file_name):
     # Gemini 임베딩 모델 준비
     embeddings = GoogleGenerativeAIEmbeddings(
         model="text-embedding-004", 
-        google_api_key=api_key
+        google_api_key=api_key,
+        task_type="retrieval_document"
     )
 
     # FAISS 벡터 스토어 생성
