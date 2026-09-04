@@ -6,6 +6,41 @@ from google import genai
 # 1. .env 환경변수 로드
 load_dotenv()
 
+import streamlit as st
+
+# 페이지 기본 설정
+st.set_page_config(page_title="Gemini Chatbot", layout="centered")
+
+# Streamlit 기본 UI 요소(상단 헤더, 우측 상단 메뉴, 하단 Footer/Made with Streamlit 배너) 숨기기
+hide_streamlit_style = """
+    <style>
+    /* 상단 헤더 숨기기 */
+    header {visibility: hidden; height: 0%;}
+    
+    /* 우측 상단 햄버거 메뉴 및 배포 메뉴 숨기기 */
+    #MainMenu {visibility: hidden;}
+    
+    /* 하단 Made with Streamlit 배너 및 Footer 숨기기 */
+    footer {visibility: hidden;}
+    .stAppFooter {display: none;}
+    
+    /* 화면 여백 최적화 (채팅창에 집중되도록) */
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 2rem;
+    }
+    </style>
+"""
+st.markdown(hide_streamlit_style, unsafe_allow_html=True)
+
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
+
 hide_github_style = """
     <style>
     #MainMenu {visibility: hidden;}
