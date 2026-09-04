@@ -11,49 +11,45 @@ import streamlit as st
 # 페이지 기본 설정
 st.set_page_config(page_title="Gemini Chatbot", layout="centered")
 
-# Streamlit 기본 UI 요소(상단 헤더, 우측 상단 메뉴, 하단 Footer/Made with Streamlit 배너) 숨기기
-hide_streamlit_style = """
+import streamlit as st
+
+st.set_page_config(page_title="Gemini Chatbot", layout="centered")
+
+# Streamlit 최신 버전 대응 - 모든 불필요한 UI 완벽 숨기기
+custom_css = """
     <style>
-    /* 상단 헤더 숨기기 */
-    header {visibility: hidden; height: 0%;}
-    
-    /* 우측 상단 햄버거 메뉴 및 배포 메뉴 숨기기 */
-    #MainMenu {visibility: hidden;}
-    
-    /* 하단 Made with Streamlit 배너 및 Footer 숨기기 */
-    footer {visibility: hidden;}
-    .stAppFooter {display: none;}
-    
-    /* 화면 여백 최적화 (채팅창에 집중되도록) */
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
+    /* 1. 상단 헤더, 메인 메뉴, 깃허브 버튼 숨기기 */
+    header, #MainMenu, [data-testid="stHeader"] {
+        display: none !important;
+        height: 0px !important;
+    }
+
+    /* 2. 하단 푸터 및 'Made with Streamlit' 배너 완전 차단 */
+    footer, .stAppFooter, [data-testid="stFooter"], [data-testid="stStatusWidget"] {
+        display: none !important;
+        height: 0px !important;
+    }
+
+    /* 3. 우측 하단 시크릿/비로그인 유저용 프로필 및 Streamlit 홍보 배너 숨기기 */
+    div[class*="viewerBadge"], 
+    div[class*="profileOwnerEl"],
+    [data-testid="stDecoration"] {
+        display: none !important;
+        visibility: hidden !important;
+    }
+
+    /* 4. 상단 빈 여백 줄여서 채팅창 밀착 */
+    .main .block-container {
+        padding-top: 1.5rem !important;
+        padding-bottom: 2rem !important;
     }
     </style>
 """
-st.markdown(hide_streamlit_style, unsafe_allow_html=True)
-
-st.markdown("""
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    </style>
-""", unsafe_allow_html=True)
-
-hide_github_style = """
-    <style>
-    #MainMenu {visibility: hidden;}
-    footer {visibility: hidden;}
-    header {visibility: hidden;}
-    </style>
-"""
-st.markdown(hide_github_style, unsafe_allow_html=True)
-
+st.markdown(custom_css, unsafe_allow_html=True)
 
 # Streamlit 페이지 기본 설정
-st.set_page_config(page_title="Gemini AI Chatbot", page_icon="🤖")
-st.title("🤖 Gemini AI 챗봇")
+st.set_page_config(page_title="홍보봇", page_icon="🤖")
+st.title("🤖 홍보봇")
 
 # 2. API Key 확인
 api_key = os.getenv("GEMINI_API_KEY")
