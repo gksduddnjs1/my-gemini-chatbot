@@ -6,6 +6,16 @@ from google import genai
 # 1. .env 환경변수 로드
 load_dotenv()
 
+hide_github_style = """
+    <style>
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+"""
+st.markdown(hide_github_style, unsafe_allow_html=True)
+
+
 # Streamlit 페이지 기본 설정
 st.set_page_config(page_title="Gemini AI Chatbot", page_icon="🤖")
 st.title("🤖 Gemini AI 챗봇")
