@@ -70,7 +70,7 @@ def process_pdf(uploaded_file_bytes, file_name):
 
     # Gemini 임베딩 모델 준비
     embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004", 
+        model="text-embedding-004", 
         google_api_key=api_key
     )
 
