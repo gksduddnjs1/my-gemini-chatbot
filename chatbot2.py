@@ -25,17 +25,20 @@ if not api_key:
 os.environ["GEMINI_API_KEY"] = api_key
 
 # 2. 웹앱 기본 설정
-st.set_page_config(page_title="스마트 PDF 문서 챗봇", page_icon="📄", layout="wide")
-st.title("📄 스마트 PDF 문서 대화 챗봇")
+st.set_page_config(page_title="스마트 AI & PDF 챗봇", page_icon="💬", layout="wide")
+st.title("💬 스마트 AI & PDF 대화 챗봇")
 
-# 3. 세션 상태 초기화 (대화 기록 및 LangChain Message 객체 저장)
+# 3. 세션 상태 초기화
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "안녕하세요! PDF 문서를 업로드해 주시면 문서 내용에 대해 대화 맥락을 기억하며 답변해 드립니다."}
+        {"role": "assistant", "content": "안녕하세요! 자유롭게 대화를 나누시거나, 필요할 때 사이드바에서 PDF 문서를 업로드해 주세요."}
     ]
 
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []  # LangChain용 (HumanMessage, AIMessage)
+
+if "file_uploader_key" not in st.session_state:
+    st.session_state.file_uploader_key = 0
 
 # 4. pdfplumber 파서를 사용한 PDF 분석 및 FAISS 벡터 DB 생성
 @st.cache_resource(show_spinner="PDF 문서의 텍스트와 레이아웃을 분석하는 중입니다...")
@@ -71,24 +74,70 @@ def process_pdf(uploaded_file_bytes, file_name):
 
     return vectorstore, docs
 
-# 5. 사이드바 - 파일 업로드, 대화 초기화 및 디버깅용 텍스트 확인
+# 5. 사이드바 - 파일 업로드, 문서 요약, PDF 제거, 대화 초기화 및 원문 확인
 with st.sidebar:
-    st.header("📄 문서 업로드")
-    uploaded_file = st.file_uploader("분석할 PDF 파일을 선택하세요", type=["pdf"])
+    st.header("📄 문서 업로드 (선택)")
     
+    uploaded_file = st.file_uploader(
+        "분석할 PDF 파일을 선택하세요 (선택 사항)", 
+        type=["pdf"],
+        key=f"pdf_uploader_{st.session_state.file_uploader_key}"
+    )
+    
+    # PDF 제거 버튼
+    if uploaded_file is not None:
+        if st.button("🗑️ 업로드된 PDF 제거", use_container_width=True, type="secondary"):
+            st.session_state.file_uploader_key += 1
+            st.cache_resource.clear()
+            st.success("PDF 문서가 제거되었습니다. 일반 대화 모드로 전환합니다.")
+            st.rerun()
+
+    st.divider()
+
     # 대화 초기화 버튼
     if st.button("🔄 대화 기록 초기화", use_container_width=True):
         st.session_state.messages = [
-            {"role": "assistant", "content": "안녕하세요! PDF 문서를 업로드해 주시면 문서 내용에 대해 대화 맥락을 기억하며 답변해 드립니다."}
+            {"role": "assistant", "content": "안녕하세요! 자유롭게 대화를 나누시거나, 필요할 때 사이드바에서 PDF 문서를 업로드해 주세요."}
         ]
         st.session_state.chat_history = []
         st.rerun()
 
+    # PDF가 업로드되었을 때만 추가 기능 활성화
     if uploaded_file is not None:
         file_bytes = uploaded_file.read()
         vectorstore, raw_docs = process_pdf(file_bytes, uploaded_file.name)
         st.success(f"'{uploaded_file.name}' 분석 완료!")
-        
+
+        # [추가] 문서 전체 요약하기 버튼
+        if st.button("📝 문서 전체 요약하기", use_container_width=True, type="primary"):
+            with st.spinner("문서 전체 내용을 바탕으로 핵심 요약을 작성하는 중입니다..."):
+                full_text = "\n\n".join([f"[Page {d.metadata['page']}]\n{d.page_content}" for d in raw_docs])
+                # 전체 텍스트가 너무 길 수 있으므로 12,000자로 안전하게 자름
+                truncated_text = full_text[:12000]
+
+                llm_summary = ChatGoogleGenerativeAI(
+                    model="gemini-3.1-flash-lite",
+                    temperature=0.2
+                )
+                
+                summary_prompt = (
+                    "당신은 뛰어난 문서 요약 전문가입니다. 아래 제공된 [문서 내용]을 바탕으로 "
+                    "전체 문서의 핵심 주제, 주요 내용, 그리고 중요한 포인트들을 깔끔하고 가독성 높게 요약해 주세요.\n\n"
+                    "작성 양식:\n"
+                    "1. 📌 **개요 및 한 줄 요약**\n"
+                    "2. 💡 **주요 핵심 내용 (불릿 포인트)**\n"
+                    "3. 📊 **특이사항 또는 결론 (필요 시 표나 리스트 활용)**\n\n"
+                    f"[문서 내용]:\n{truncated_text}"
+                )
+                
+                summary_response = llm_summary.invoke(summary_prompt)
+                summary_result = summary_response.content
+
+                # 요약 결과를 대화 창에 표시 및 세션에 추가
+                st.session_state.messages.append({"role": "assistant", "content": f"📋 **[{uploaded_file.name}] 전체 문서 요약**\n\n{summary_result}"})
+                st.session_state.chat_history.append(AIMessage(content=summary_result))
+                st.rerun()
+
         st.divider()
         st.subheader("🔍 PDF 추출 원문 확인")
         page_num = st.number_input("확인할 페이지 번호", min_value=1, max_value=len(raw_docs), value=1, step=1)
@@ -106,27 +155,40 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 7. 질문 입력 및 처리 (대화 맥락 반영 RAG)
-if user_input := st.chat_input("문서 내용에 대해 무엇이든 질문해 보세요..."):
+# 7. 질문 입력 및 처리
+if user_input := st.chat_input("질문이나 대화를 입력해 보세요..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
         st.markdown(user_input)
 
-    if uploaded_file is None:
-        with st.chat_message("assistant"):
-            st.markdown("먼저 사이드바에서 PDF 파일을 업로드해 주세요.")
-            st.session_state.messages.append({"role": "assistant", "content": "먼저 사이드바에서 PDF 파일을 업로드해 주세요."})
-    else:
-        with st.chat_message("assistant"):
-            with st.spinner("문서 내용을 바탕으로 답변을 작성 중입니다..."):
-                llm = ChatGoogleGenerativeAI(
-                    model="gemini-3.1-flash-lite",
-                    temperature=0.2
-                )
+    with st.chat_message("assistant"):
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-3.1-flash-lite",
+            temperature=0.3
+        )
+        recent_chat_history = st.session_state.chat_history[-6:]
 
+        # 모드 A: PDF 미업로드 시 (일반 LLM 대화 모드)
+        if uploaded_file is None:
+            with st.spinner("생각 중입니다..."):
+                prompt = ChatPromptTemplate.from_messages([
+                    ("system", "당신은 친절하고 유능한 AI 보조입니다. 사용자의 질문에 지식과 대화 맥락을 활용하여 정확하고 명확하게 답변해 주세요."),
+                    MessagesPlaceholder("chat_history"),
+                    ("human", "{input}")
+                ])
+                chain = prompt | llm
+                response = chain.invoke({
+                    "input": user_input,
+                    "chat_history": recent_chat_history
+                })
+                answer_text = response.content
+                st.markdown(answer_text)
+
+        # 모드 B: PDF 업로드 시 (문서 기반 RAG 모드)
+        else:
+            with st.spinner("문서 내용을 바탕으로 답변을 작성 중입니다..."):
                 retriever = vectorstore.as_retriever(search_kwargs={"k": 4})
 
-                # 이전 대화 맥락 반영 질문 재구성 프롬프트
                 contextualize_q_system_prompt = (
                     "이전 대화 내용과 최신 사용자 질문이 주어졌을 때, "
                     "이전 대화 내용 없이도 이해할 수 있는 독립적인 질문으로 재구성하세요. "
@@ -142,7 +204,6 @@ if user_input := st.chat_input("문서 내용에 대해 무엇이든 질문해 �
                     llm, retriever, contextualize_q_prompt
                 )
 
-                # 범용 문서 분석 및 답변 프롬프트
                 system_prompt = (
                     "당신은 친절하고 정교한 문서 분석 전문 AI 보조입니다.\n"
                     "아래 제공된 [참고 문서 내용]만을 바탕으로 질문에 정확하고 명확하게 답변하세요.\n"
@@ -159,9 +220,6 @@ if user_input := st.chat_input("문서 내용에 대해 무엇이든 질문해 �
                 question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
                 rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
-                # 토큰 절약을 위한 대화 이력 슬라이싱 (최근 6개 메시지)
-                recent_chat_history = st.session_state.chat_history[-6:]
-
                 response = rag_chain.invoke({
                     "input": user_input,
                     "chat_history": recent_chat_history
@@ -170,7 +228,6 @@ if user_input := st.chat_input("문서 내용에 대해 무엇이든 질문해 �
                 answer_text = response["answer"]
                 st.markdown(answer_text)
 
-                # 출처 표기 (Expander)
                 if "context" in response and response["context"]:
                     with st.expander("🔍 AI가 참고한 PDF 페이지 및 원문 보기"):
                         for i, doc in enumerate(response["context"]):
@@ -178,6 +235,7 @@ if user_input := st.chat_input("문서 내용에 대해 무엇이든 질문해 �
                             st.markdown(f"**[참고 {i+1}] (Page {page_num})**")
                             st.caption(doc.page_content[:300] + "...")
 
-                st.session_state.chat_history.append(HumanMessage(content=user_input))
-                st.session_state.chat_history.append(AIMessage(content=answer_text))
-                st.session_state.messages.append({"role": "assistant", "content": answer_text})
+        # 대화 이력 업데이트 (공통)
+        st.session_state.chat_history.append(HumanMessage(content=user_input))
+        st.session_state.chat_history.append(AIMessage(content=answer_text))
+        st.session_state.messages.append({"role": "assistant", "content": answer_text})
