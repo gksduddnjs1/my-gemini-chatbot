@@ -181,7 +181,22 @@ if user_input := st.chat_input("질문이나 대화를 입력해 보세요..."):
                     "input": user_input,
                     "chat_history": recent_chat_history
                 })
-                answer_text = response.content
+                # 기존: answer_text = response.content (또는 response["answer"])
+
+                # 안전하게 텍스트만 추출하는 함수 적용
+                def extract_text(response_obj):
+                    if isinstance(response_obj, str):
+                        return response_obj
+                    elif isinstance(response_obj, list) and len(response_obj) > 0:
+                        first_item = response_obj[0]
+                        if isinstance(first_item, dict) and "text" in first_item:
+                            return first_item["text"]
+                    elif hasattr(response_obj, "content"):
+                        return response_obj.content
+                    return str(response_obj)
+
+                # 적용 예시
+                answer_text = extract_text(response.content if hasattr(response, "content") else response["answer"])
                 st.markdown(answer_text)
 
         # 모드 B: PDF 업로드 시 (문서 기반 RAG 모드)
