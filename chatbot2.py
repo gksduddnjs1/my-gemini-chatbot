@@ -14,7 +14,9 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langchain_classic.chains import create_history_aware_retriever, create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
 
-# 1. 환경 변수 로드
+# ---------------------------------------------------------
+# 1. 환경 변수 및 공통 유틸리티 설정
+# ---------------------------------------------------------
 load_dotenv()
 api_key = st.secrets.get("GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
 
@@ -24,23 +26,55 @@ if not api_key:
 
 os.environ["GEMINI_API_KEY"] = api_key
 
-# 2. 웹앱 기본 설정
+
+def parse_llm_response(response_obj) -> str:
+    """LLM 응답 객체에서 순수 텍스트만 안전하게 추출하는 방어적 유틸리티 함수"""
+    if isinstance(response_obj, str):
+        return response_obj
+    
+    # LangChain BaseMessage 형태
+    if hasattr(response_obj, "content"):
+        content = response_obj.content
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list) and len(content) > 0:
+            first = content[0]
+            if isinstance(first, dict) and "text" in first:
+                return first["text"]
+            return str(first)
+        return str(content)
+    
+    # 딕셔너리 또는 리스트 형태
+    if isinstance(response_obj, list) and len(response_obj) > 0:
+        first = response_obj[0]
+        if isinstance(first, dict) and "text" in first:
+            return first["text"]
+        return str(first)
+        
+    return str(response_obj)
+
+
+# ---------------------------------------------------------
+# 2. 웹앱 기본 설정 및 세션 초기화
+# ---------------------------------------------------------
 st.set_page_config(page_title="스마트 AI & PDF 챗봇", page_icon="💬", layout="wide")
 st.title("💬 스마트 AI & PDF 대화 챗봇")
 
-# 3. 세션 상태 초기화
 if "messages" not in st.session_state:
     st.session_state.messages = [
         {"role": "assistant", "content": "안녕하세요! 자유롭게 대화를 나누시거나, 필요할 때 사이드바에서 PDF 문서를 업로드해 주세요."}
     ]
 
 if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []  # LangChain용 (HumanMessage, AIMessage)
+    st.session_state.chat_history = []
 
 if "file_uploader_key" not in st.session_state:
     st.session_state.file_uploader_key = 0
 
-# 4. pdfplumber 파서를 사용한 PDF 분석 및 FAISS 벡터 DB 생성
+
+# ---------------------------------------------------------
+# 3. PDF 분석 및 벡터 DB 생성 (캐싱)
+# ---------------------------------------------------------
 @st.cache_resource(show_spinner="PDF 문서의 텍스트와 레이아웃을 분석하는 중입니다...")
 def process_pdf(uploaded_file_bytes, file_name):
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
@@ -53,11 +87,10 @@ def process_pdf(uploaded_file_bytes, file_name):
             for i, page in enumerate(pdf.pages):
                 text = page.extract_text(layout=True)
                 if text and text.strip():
-                    doc = Document(
+                    docs.append(Document(
                         page_content=text,
                         metadata={"source": file_name, "page": i + 1}
-                    )
-                    docs.append(doc)
+                    ))
     finally:
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -74,7 +107,10 @@ def process_pdf(uploaded_file_bytes, file_name):
 
     return vectorstore, docs
 
-# 5. 사이드바 - 파일 업로드, 문서 요약, PDF 제거, 대화 초기화 및 원문 확인
+
+# ---------------------------------------------------------
+# 4. 사이드바 구성 (파일 업로드, 요약, 초기화, 원문 확인)
+# ---------------------------------------------------------
 with st.sidebar:
     st.header("📄 문서 업로드 (선택)")
     
@@ -84,7 +120,6 @@ with st.sidebar:
         key=f"pdf_uploader_{st.session_state.file_uploader_key}"
     )
     
-    # PDF 제거 버튼
     if uploaded_file is not None:
         if st.button("🗑️ 업로드된 PDF 제거", use_container_width=True, type="secondary"):
             st.session_state.file_uploader_key += 1
@@ -94,7 +129,6 @@ with st.sidebar:
 
     st.divider()
 
-    # 대화 초기화 버튼
     if st.button("🔄 대화 기록 초기화", use_container_width=True):
         st.session_state.messages = [
             {"role": "assistant", "content": "안녕하세요! 자유롭게 대화를 나누시거나, 필요할 때 사이드바에서 PDF 문서를 업로드해 주세요."}
@@ -102,17 +136,14 @@ with st.sidebar:
         st.session_state.chat_history = []
         st.rerun()
 
-    # PDF가 업로드되었을 때만 추가 기능 활성화
     if uploaded_file is not None:
         file_bytes = uploaded_file.read()
         vectorstore, raw_docs = process_pdf(file_bytes, uploaded_file.name)
         st.success(f"'{uploaded_file.name}' 분석 완료!")
 
-        # [추가] 문서 전체 요약하기 버튼
         if st.button("📝 문서 전체 요약하기", use_container_width=True, type="primary"):
             with st.spinner("문서 전체 내용을 바탕으로 핵심 요약을 작성하는 중입니다..."):
                 full_text = "\n\n".join([f"[Page {d.metadata['page']}]\n{d.page_content}" for d in raw_docs])
-                # 전체 텍스트가 너무 길 수 있으므로 12,000자로 안전하게 자름
                 truncated_text = full_text[:12000]
 
                 llm_summary = ChatGoogleGenerativeAI(
@@ -131,10 +162,12 @@ with st.sidebar:
                 )
                 
                 summary_response = llm_summary.invoke(summary_prompt)
-                summary_result = summary_response.content
+                summary_result = parse_llm_response(summary_response)
 
-                # 요약 결과를 대화 창에 표시 및 세션에 추가
-                st.session_state.messages.append({"role": "assistant", "content": f"📋 **[{uploaded_file.name}] 전체 문서 요약**\n\n{summary_result}"})
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": f"📋 **[{uploaded_file.name}] 전체 문서 요약**\n\n{summary_result}"
+                })
                 st.session_state.chat_history.append(AIMessage(content=summary_result))
                 st.rerun()
 
@@ -150,12 +183,14 @@ with st.sidebar:
                 height=300
             )
 
-# 6. 이전 대화 기록 출력
+
+# ---------------------------------------------------------
+# 5. 메인 대화 창 및 사용자 입력 처리
+# ---------------------------------------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# 7. 질문 입력 및 처리
 if user_input := st.chat_input("질문이나 대화를 입력해 보세요..."):
     st.session_state.messages.append({"role": "user", "content": user_input})
     with st.chat_message("user"):
@@ -181,22 +216,7 @@ if user_input := st.chat_input("질문이나 대화를 입력해 보세요..."):
                     "input": user_input,
                     "chat_history": recent_chat_history
                 })
-                # 기존: answer_text = response.content (또는 response["answer"])
-
-                # 안전하게 텍스트만 추출하는 함수 적용
-                def extract_text(response_obj):
-                    if isinstance(response_obj, str):
-                        return response_obj
-                    elif isinstance(response_obj, list) and len(response_obj) > 0:
-                        first_item = response_obj[0]
-                        if isinstance(first_item, dict) and "text" in first_item:
-                            return first_item["text"]
-                    elif hasattr(response_obj, "content"):
-                        return response_obj.content
-                    return str(response_obj)
-
-                # 적용 예시
-                answer_text = extract_text(response.content if hasattr(response, "content") else response["answer"])
+                answer_text = parse_llm_response(response)
                 st.markdown(answer_text)
 
         # 모드 B: PDF 업로드 시 (문서 기반 RAG 모드)
@@ -240,7 +260,7 @@ if user_input := st.chat_input("질문이나 대화를 입력해 보세요..."):
                     "chat_history": recent_chat_history
                 })
 
-                answer_text = response["answer"]
+                answer_text = parse_llm_response(response.get("answer", response))
                 st.markdown(answer_text)
 
                 if "context" in response and response["context"]:
